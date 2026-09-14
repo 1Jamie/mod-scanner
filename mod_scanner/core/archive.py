@@ -63,11 +63,14 @@ def validate_archive_metadata(
             continue
 
         # 3. Compression ratio pre-calculation check
-        if zinfo.compress_size > 0:
+        # Real zip bombs attempt to expand into gigabytes. Files smaller than 5MB
+        # (such as repetitive JSON data or source files) pose no memory exhaustion risk.
+        min_size_for_ratio_check = 5 * 1024 * 1024  # 5 MB
+        if zinfo.file_size > min_size_for_ratio_check and zinfo.compress_size > 0:
             ratio = zinfo.file_size / zinfo.compress_size
             if ratio > config.max_compression_ratio:
                 raise ZipBombError(
-                    f"Compression ratio for '{zinfo.filename}' is {ratio:.1f}:1, "
+                    f"Compression ratio for '{zinfo.filename}' is {ratio:.1f}:1 ({zinfo.file_size / (1024*1024):.1f} MB unpacked), "
                     f"exceeding max allowable ratio of {config.max_compression_ratio}:1"
                 )
 

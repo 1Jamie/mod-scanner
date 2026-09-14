@@ -28,9 +28,9 @@ def test_safe_zip_passes():
 
 
 def test_zip_bomb_compression_ratio_rejected():
-    config = ArchiveConfig(max_unpacked_size_mb=100, max_file_count=100, max_compression_ratio=5.0)
-    # Highly compressible sequence of zeroes
-    huge_zeroes = b"\x00" * (1024 * 1024)  # 1MB of zeroes compresses to a few hundred bytes (>1000:1 ratio)
+    config = ArchiveConfig(max_unpacked_size_mb=100, max_file_count=100, max_compression_ratio=20.0)
+    # Highly compressible sequence of zeroes > 5MB
+    huge_zeroes = b"\x00" * (6 * 1024 * 1024)  # 6MB of zeroes compresses to ~6KB (>1000:1 ratio)
     data = create_mock_zip({"bomb.dat": huge_zeroes})
 
     with pytest.raises(ZipBombError) as exc_info:

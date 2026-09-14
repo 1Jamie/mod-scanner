@@ -30,7 +30,7 @@ class MagicByteRule:
 class ArchiveConfig:
     max_unpacked_size_mb: int = 500
     max_file_count: int = 50000
-    max_compression_ratio: float = 20.0
+    max_compression_ratio: float = 100.0
 
     @property
     def max_unpacked_size_bytes(self) -> int:
