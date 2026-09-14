@@ -151,3 +151,37 @@ def test_scan_target_sync_dispatch(mock_scanner, tmp_path):
     res_zip = mock_scanner.scan_target_sync(zip_path)
     assert res_zip.is_clean
 
+
+def test_pipeline_raw_rgba_texture_scan(mock_scanner):
+    # Direct rip rendered as raw RGBA buffer (56x56 = 3136 pixels * 4 = 12544 bytes)
+    rip_png = create_test_image(color=(0, 0, 255))
+    img = Image.open(io.BytesIO(rip_png))
+    raw_rgba_data = img.tobytes("raw", "RGBA")
+
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w") as z:
+        z.writestr("textures/bulbasaur.rgba", raw_rgba_data)
+
+    result = mock_scanner.scan_archive_sync(zip_buf.getvalue())
+    assert result.is_rejected
+    assert any("bulbasaur.png" in v.message for v in result.violations)
+
+
+def test_pipeline_importer_scripts_allowed(mock_scanner):
+    # Importer script that guides extraction from user-provided ROM/ISO
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w") as z:
+        z.writestr(
+            "portrait_bounds.lua",
+            b"-- Reference to GC6E01 poke_face.fsys extraction table\nreturn {['assets/portraits/001.png']={0,0,42,42}}"
+        )
+        z.writestr("manifest.json", '{"target_game": "Pokémon Colosseum (GameCube)", "game_id": "GC6E01"}'.encode("utf-8"))
+
+    result = mock_scanner.scan_archive_sync(zip_buf.getvalue())
+    assert result.is_clean
+    assert result.status == "CLEAN"
+
+
+
+
+

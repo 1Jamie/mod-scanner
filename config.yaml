@@ -40,6 +40,14 @@ pret_sources:
       - "graphics/pokemon/**/front.png"
       - "graphics/pokemon/**/back.png"
       - "graphics/trainers/**/*.png"
+  - name: "pokeemerald"
+    repo: "pret/pokeemerald"
+    branch: "master"
+    image_patterns:
+      - "graphics/pokemon/**/front.png"
+      - "graphics/pokemon/**/back.png"
+      - "graphics/pokemon/**/icon.png"
+      - "graphics/trainers/**/*.png"
 
 # Archive safety limits
 archive:
@@ -50,22 +58,82 @@ archive:
 # Static binary checks (Console ROM headers & Blacklists)
 binary_rules:
   blacklisted_extensions:
+    # Retro Nintendo ROM formats (NES, SNES, GB, GBC, GBA, N64)
+    - ".nes"
+    - ".fds"
+    - ".sfc"
+    - ".smc"
+    - ".swc"
+    - ".fig"
     - ".gb"
     - ".gbc"
+    - ".sgb"
     - ".gba"
-    - ".nds"
-    - ".3ds"
-    - ".cia"
-    - ".cxi"
     - ".z64"
     - ".n64"
     - ".v64"
+    # GameCube, Wii & Wii U Disc / Image formats
     - ".iso"
+    - ".gcm"
+    - ".tgp"
+    - ".gcz"
+    - ".rvz"
+    - ".wia"
     - ".wbfs"
+    - ".ciso"
+    - ".wud"
+    - ".wux"
+    - ".wua"
     - ".wad"
+    - ".dol"
+    - ".rel"
+    - ".rpx"
+    - ".rpl"
+    - ".nus"
+    # Nintendo DS & 3DS formats
+    - ".nds"
+    - ".dsi"
+    - ".srl"
+    - ".3ds"
+    - ".3dsx"
+    - ".cia"
+    - ".cxi"
+    - ".app"
+    - ".smdh"
+    # Nintendo Switch formats
     - ".nsp"
     - ".xci"
+    - ".nsz"
+    - ".xcz"
+    - ".nca"
+    - ".nro"
+    - ".nso"
+    - ".kip"
+    # Proprietary container & asset formats
+    - ".fsys"
+    - ".rarc"
+    - ".tpl"
+    - ".bti"
+    - ".brres"
+    - ".garc"
+    - ".darc"
+    - ".dsp"
+    - ".brstm"
+    - ".bcstm"
+    - ".bfstm"
+    - ".hps"
+    - ".musyx"
+    - ".sdat"
   magic_bytes:
+    # NES & Famicom Disk System
+    - name: "NES ROM Header (iNES)"
+      offset: 0x0000
+      hex: "4e45531a" # "NES\x1A"
+    - name: "Famicom Disk System Header"
+      offset: 0x0000
+      hex: "4644531a" # "FDS\x1A"
+
+    # Game Boy / GBA / N64 Console ROMs
     - name: "Game Boy / GBC Nintendo Logo"
       offset: 0x0104
       hex: "ceed6666cc0d000b03730083000c000d0008111f8889000eaccf"
@@ -81,30 +149,95 @@ binary_rules:
     - name: "N64 ROM (Little Endian)"
       offset: 0x0000
       hex: "40123780"
-    - name: "GameCube / Wii Disc Magic"
+
+    # GameCube, Wii & Wii U Disc & Container Formats
+    - name: "GameCube Disc Magic"
       offset: 0x001C
       hex: "c2339f3d"
+    - name: "Wii Disc Magic"
+      offset: 0x0018
+      hex: "5d1c9ea3"
+    - name: "Dolphin RVZ Compressed Disc Container"
+      offset: 0x0000
+      hex: "52565a01" # "RVZ\x01"
+    - name: "Wii WIA Compressed Disc Container"
+      offset: 0x0000
+      hex: "57494101" # "WIA\x01"
+    - name: "GameCube GCZ Compressed Container"
+      offset: 0x0000
+      hex: "47435a" # "GCZ"
+    - name: "Wii WBFS Disc Container"
+      offset: 0x0000
+      hex: "57424653" # "WBFS"
+    - name: "GameCube Genius Sonority FSYS Container"
+      offset: 0x0000
+      hex: "46535953" # "FSYS"
+    - name: "GameCube / Wii RARC Archive"
+      offset: 0x0000
+      hex: "52415243" # "RARC"
+    - name: "Nintendo U8 Archive"
+      offset: 0x0000
+      hex: "55aa382d"
+    - name: "GameCube Texture Palette Library (TPL)"
+      offset: 0x0000
+      hex: "0020af30"
+    - name: "GameCube HPS Audio Stream"
+      offset: 0x0000
+      hex: "48505331" # "HPS1"
+
+    # Nintendo DS & 3DS Headers
     - name: "Nintendo DS Logo Header"
       offset: 0x00C0
       hex: "24ffae51699aa2213d84820a84e409ad"
     - name: "Nintendo DS Logo CRC"
       offset: 0x015C
       hex: "cf56"
+    - name: "Nintendo DS Sound Data (SDAT)"
+      offset: 0x0000
+      hex: "53444154" # "SDAT"
     - name: "3DS NCCH Partition"
       offset: 0x0100
       hex: "4e434348" # "NCCH"
     - name: "3DS NCSD Header"
       offset: 0x0100
       hex: "4e435344" # "NCSD"
-    - name: "Nintendo Switch NSP (PFS0)"
+    - name: "3DS Executable (3DSX)"
+      offset: 0x0000
+      hex: "33445358" # "3DSX"
+    - name: "3DS System Menu Data Header (SMDH)"
+      offset: 0x0000
+      hex: "534d4448" # "SMDH"
+    - name: "3DS General Archive (GARC)"
+      offset: 0x0000
+      hex: "47415243" # "GARC"
+
+    # Nintendo Switch Formats
+    - name: "Nintendo Switch NSP / PFS0 Container"
       offset: 0x0000
       hex: "50465330" # "PFS0"
-    - name: "Nintendo Switch XCI (HFS0)"
+    - name: "Nintendo Switch XCI / HFS0 Container"
       offset: 0x0000
       hex: "48465330" # "HFS0"
+    - name: "Nintendo Switch Content Archive (NCA)"
+      offset: 0x0200
+      hex: "4e4341" # "NCA"
 
   # Deep signatures searched anywhere within binary packages (.pack, .dat, .bin, .pak, .bundle, etc.)
   contained_signatures:
+    - name: "NKit GameCube/Wii Recovery Data"
+      pattern: "NKIT"
+    - name: "Dolphin RVZ Disc Container"
+      pattern: "RVZ\x01"
+    - name: "Wii WBFS Disc Container"
+      pattern: "WBFS"
+    - name: "GameCube Genius Sonority FSYS Container"
+      pattern: "FSYS"
+    - name: "GameCube / Wii RARC Archive"
+      pattern: "RARC"
+    - name: "GameCube / Wii Binary Resource (BRRES)"
+      pattern: "bres"
+    - name: "MusyX Audio Engine / Soundbank"
+      pattern: "MusyX"
     - name: "Nintendo 3DS Binary Resource (.bcres)"
       pattern: ".bcres"
     - name: "Nintendo 3DS Binary Model (.bcmdl)"
@@ -166,3 +299,5 @@ discord:
 paths:
   cache_dir: "./.cache"
   whitelist_file: "./whitelist.json"
+
+

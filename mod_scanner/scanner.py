@@ -7,6 +7,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import math
 import os
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -28,7 +29,42 @@ from .pret_fetcher import ReferenceDatabase, load_or_fetch_reference_database
 
 logger = logging.getLogger("mod_scanner.scanner")
 
-CONTAINER_PACKAGE_EXTENSIONS = {".pack", ".dat", ".pak", ".bundle", ".bin", ".arc", ".res"}
+IMAGE_EXTENSIONS = {".png", ".bmp", ".jpg", ".jpeg", ".webp", ".tga"}
+RAW_TEXTURE_EXTENSIONS = {".rgba", ".rgb", ".bgra", ".raw"}
+CONTAINER_PACKAGE_EXTENSIONS = {".pack", ".dat", ".pak", ".bundle", ".bin", ".arc", ".res", ".fsys", ".rarc"}
+
+
+def _parse_image_from_bytes(raw_data: bytes, ext_lower: str) -> Optional[Image.Image]:
+    """Attempts to parse raw bytes into a Pillow Image from standard formats or raw buffers."""
+    if ext_lower in IMAGE_EXTENSIONS:
+        try:
+            img = Image.open(io.BytesIO(raw_data))
+            img.load()
+            return img
+        except Exception:
+            return None
+    elif ext_lower in RAW_TEXTURE_EXTENSIONS:
+        length = len(raw_data)
+        if ext_lower in {".rgba", ".bgra", ".raw"} and length >= 64:
+            w = int(math.isqrt(length // 4))
+            if w * w * 4 == length:
+                try:
+                    mode = "RGBA" if ext_lower in {".rgba", ".raw"} else "BGRA"
+                    img = Image.frombytes(mode, (w, w), raw_data)
+                    if mode == "BGRA":
+                        img = img.convert("RGBA")
+                    return img
+                except Exception:
+                    return None
+        elif ext_lower == ".rgb" and length >= 48:
+            w = int(math.isqrt(length // 3))
+            if w * w * 3 == length:
+                try:
+                    return Image.frombytes("RGB", (w, w), raw_data)
+                except Exception:
+                    return None
+    return None
+
 
 
 @dataclass
@@ -277,18 +313,19 @@ class ModScanner:
                         # Hard binary violations immediately classify as REJECT
                         continue
 
-                # 3. Tier 2: Perceptual Image Hashing (PNG, BMP, JPG)
-                if ext_lower in {".png", ".bmp", ".jpg", ".jpeg"}:
+                # 3. Tier 2: Perceptual Image Hashing (PNG, BMP, JPG, WEBP, TGA, RGBA, RGB)
+                parsed_img = None
+                if ext_lower in IMAGE_EXTENSIONS or ext_lower in RAW_TEXTURE_EXTENSIONS:
                     try:
                         with z.open(zinfo, "r") as img_stream:
                             raw_data = img_stream.read()
-                            img = Image.open(io.BytesIO(raw_data))
-                            img.load()
-                            _evaluate_image_against_reference_db(img, filename, self, violations, flags)
+                            parsed_img = _parse_image_from_bytes(raw_data, ext_lower)
+                            if parsed_img is not None:
+                                _evaluate_image_against_reference_db(parsed_img, filename, self, violations, flags)
                     except Exception as e:
                         logger.debug(f"Could not parse image {filename}: {e}")
 
-                # 4. Embedded Image scanning in Binary Container packages (.pack, .dat, .pak, etc.)
+                # 5. Embedded Image scanning in Binary Container packages (.pack, .dat, .pak, .fsys, etc.)
                 elif ext_lower in CONTAINER_PACKAGE_EXTENSIONS:
                     try:
                         with z.open(zinfo, "r") as pkg_stream:
@@ -399,18 +436,18 @@ class ModScanner:
                     logger.debug(f"Could not read file stream for {rel_path}: {e}")
                     continue
 
-                # 2. Tier 2: Perceptual Image Hashing
-                if ext_lower in {".png", ".bmp", ".jpg", ".jpeg"}:
+                # 2. Tier 2: Perceptual Image Hashing (PNG, BMP, JPG, WEBP, TGA, RGBA, RGB)
+                if ext_lower in IMAGE_EXTENSIONS or ext_lower in RAW_TEXTURE_EXTENSIONS:
                     try:
                         with open(abs_file_path, "rb") as img_stream:
                             raw_data = img_stream.read()
-                            img = Image.open(io.BytesIO(raw_data))
-                            img.load()
-                            _evaluate_image_against_reference_db(img, rel_path, self, violations, flags)
+                            parsed_img = _parse_image_from_bytes(raw_data, ext_lower)
+                            if parsed_img is not None:
+                                _evaluate_image_against_reference_db(parsed_img, rel_path, self, violations, flags)
                     except Exception as e:
                         logger.debug(f"Could not parse image {rel_path}: {e}")
 
-                # 3. Embedded Image scanning in Binary Container packages
+                # 4. Embedded Image scanning in Binary Container packages
                 elif ext_lower in CONTAINER_PACKAGE_EXTENSIONS:
                     try:
                         with open(abs_file_path, "rb") as pkg_stream:

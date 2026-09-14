@@ -19,7 +19,8 @@ class BinaryViolation:
 
 TEXT_SOURCE_EXTENSIONS = {
     ".lua", ".py", ".md", ".txt", ".json", ".yml", ".yaml",
-    ".toml", ".ini", ".c", ".h", ".cpp", ".hpp", ".rs", ".go", ".js", ".ts", ".html", ".css"
+    ".toml", ".ini", ".c", ".h", ".cpp", ".hpp", ".rs", ".go", ".js", ".ts", ".html", ".css",
+    ".patch", ".diff", ".log", ".csv", ".tsv", ".xml", ".svg", ".card"
 }
 
 

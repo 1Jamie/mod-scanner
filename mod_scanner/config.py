@@ -101,6 +101,7 @@ class Config:
     discord: DiscordConfig = field(default_factory=DiscordConfig)
     paths: PathsConfig = field(default_factory=PathsConfig)
 
+
     @classmethod
     def from_file(cls, config_path: str | Path = "config.yaml") -> Config:
         path = Path(config_path)
@@ -225,3 +226,5 @@ class Config:
             discord=discord,
             paths=paths,
         )
+
+
