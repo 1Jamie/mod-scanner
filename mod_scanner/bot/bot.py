@@ -276,27 +276,182 @@ def build_discord_bot(config: Config) -> commands.Bot:
         except Exception as e:
             logger.debug(f"Could not check starter message for thread {thread.name}: {e}")
 
-    @bot.command(name="scan")
-    async def manual_scan_command(ctx: commands.Context, url: str):
-        """Manually trigger a scan on a downloadable .zip URL."""
-        status_msg = await ctx.send(f"⏳ Downloading and scanning `{url}`...")
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
-                    if resp.status != 200:
-                        await status_msg.edit(content=f"❌ Failed to download archive (HTTP {resp.status})")
-                        return
-                    zip_data = await resp.read()
+    async def handle_self_check(
+        zip_bytes: bytes,
+        source_name: str,
+        user: discord.User | discord.Member,
+    ) -> tuple[discord.Embed, list[discord.File]]:
+        """Scans a mod payload for self-service developer checks and builds response embeds and diff attachments."""
+        result: ScanResult = await asyncio.to_thread(scanner.scan_archive_sync, zip_bytes)
+        files_to_send: list[discord.File] = []
 
-            result = await asyncio.to_thread(scanner.scan_archive_sync, zip_data)
-            if result.is_clean:
-                await status_msg.edit(content=f"✅ **CLEAN**: `{url}` passed scan. ({result.scanned_file_count} files)")
-            elif result.is_rejected:
-                reasons = "\n".join([f"• {v.message}" for v in result.violations[:5]])
-                await status_msg.edit(content=f"❌ **REJECTED**: Prohibited assets found in `{url}`:\n{reasons}")
+        if result.is_clean:
+            embed = discord.Embed(
+                title=f"✅ Pre-Check Passed: {source_name}",
+                description=(
+                    f"**Status:** Clean\n"
+                    f"**Files Scanned:** {result.scanned_file_count} (in {result.elapsed_seconds}s)\n\n"
+                    f"No official Nintendo ROM headers, proprietary binaries, or matching canonical sprites were detected. "
+                    f"Your mod is ready for upload!"
+                ),
+                color=discord.Color.green(),
+            )
+            return embed, files_to_send
+
+        elif result.is_rejected:
+            embed = discord.Embed(
+                title=f"❌ Pre-Check Failed (Prohibited Assets): {source_name}",
+                description=(
+                    f"**Status:** Rejected\n"
+                    f"**Violations Found:** {len(result.violations)}\n"
+                    f"**Files Scanned:** {result.scanned_file_count} (in {result.elapsed_seconds}s)\n\n"
+                    f"The following prohibited files or direct asset rips were detected:\n"
+                ),
+                color=discord.Color.red(),
+            )
+            for i, v in enumerate(result.violations[:10], 1):
+                embed.add_field(
+                    name=f"Violation #{i}: `{v.file_path}`",
+                    value=f"• **Rule:** `{v.rule_type}`\n• **Reason:** {v.message}",
+                    inline=False,
+                )
+            if len(result.violations) > 10:
+                embed.add_field(
+                    name="📦 Additional Violations",
+                    value=f"_...and **{len(result.violations) - 10} more** violations._",
+                    inline=False,
+                )
+            embed.set_footer(text="Please remove official ROM headers, dumped archives, or direct rips before posting.")
+            return embed, files_to_send
+
+        else:  # FLAGGED
+            embed = discord.Embed(
+                title=f"⚠️ Similarity Review Needed: {source_name}",
+                description=(
+                    f"**Status:** Flagged for Moderator Review\n"
+                    f"**Flagged Assets:** {len(result.flags)} of {result.scanned_file_count} files\n"
+                    f"**Scan Duration:** {result.elapsed_seconds}s\n\n"
+                    f"These assets closely resemble official sprites. If they are original hand-drawn demakes, "
+                    f"moderators will review the 3-panel diffs when you post your thread."
+                ),
+                color=discord.Color.gold(),
+            )
+
+            sorted_flags = sorted(result.flags, key=lambda f: f.hamming_distance)
+            top_flags = sorted_flags[:5]
+
+            for i, flag in enumerate(top_flags, 1):
+                pct = round((1 - flag.hamming_distance / 256) * 100, 1)
+                embed.add_field(
+                    name=f"Asset #{i}: `{flag.file_path}`",
+                    value=(
+                        f"• **Match:** `{flag.matched_ref}`\n"
+                        f"• **Similarity:** `{pct}%` (Hamming distance `{flag.hamming_distance}/256`)\n"
+                        f"• **Hash:** `{flag.mod_hash[:16]}...`"
+                    ),
+                    inline=False,
+                )
+                if flag.preview_bytes and i == 1:
+                    preview_filename = "self_check_diff_preview.png"
+                    files_to_send.append(
+                        discord.File(io.BytesIO(flag.preview_bytes), filename=preview_filename)
+                    )
+                    embed.set_image(url=f"attachment://{preview_filename}")
+
+            if len(sorted_flags) > 5:
+                embed.add_field(
+                    name="📦 Additional Flagged Assets",
+                    value=f"_...and **{len(sorted_flags) - 5} more** flagged assets included in the diff bundle._",
+                    inline=False,
+                )
+
+            # Generate downloadable diff bundle so author can inspect locally
+            if result.flags:
+                bundle_buf = create_diff_bundle_zip(source_name, result)
+                files_to_send.append(
+                    discord.File(bundle_buf, filename=f"precheck_diffs_{source_name.replace('.zip', '')}.zip")
+                )
+
+            embed.set_footer(text="Panel format: [ Mod Asset ] [ Canonical Ref ] [ Pixel Diff ]")
+            return embed, files_to_send
+
+    @bot.tree.command(name="check-mod", description="Privately pre-check your mod zip before posting to avoid auto-rejections.")
+    async def check_mod_slash(
+        interaction: discord.Interaction,
+        file: discord.Attachment | None = None,
+        url: str | None = None,
+    ):
+        """Slash command for self-service pre-checks (runs ephemerally)."""
+        if not file and not url:
+            await interaction.response.send_message(
+                "❌ Please attach a `.zip` file or provide a direct `.zip` URL to check.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            if file:
+                if not file.filename.lower().endswith(".zip"):
+                    await interaction.followup.send("❌ Attached file must be a `.zip` archive.", ephemeral=True)
+                    return
+                source_name = file.filename
+                zip_data = await file.read()
             else:
-                await status_msg.edit(content=f"⚠️ **FLAGGED**: {len(result.flags)} asset(s) need review in `{url}`.")
+                source_name = url.split("/")[-1] or "mod.zip"
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                        if resp.status != 200:
+                            await interaction.followup.send(f"❌ Failed to download archive (HTTP {resp.status})", ephemeral=True)
+                            return
+                        zip_data = await resp.read()
+
+            embed, files = await handle_self_check(zip_data, source_name, interaction.user)
+            await interaction.followup.send(embed=embed, files=files, ephemeral=True)
+
         except Exception as e:
-            await status_msg.edit(content=f"❌ Error scanning URL: {e}")
+            logger.exception(f"Error in /check-mod: {e}")
+            await interaction.followup.send(f"❌ Error during mod pre-check: {e}", ephemeral=True)
+
+    @bot.command(name="check")
+    async def manual_check_command(ctx: commands.Context, url: str | None = None):
+        """Self-service check via message attachment or URL."""
+        attachment = ctx.message.attachments[0] if ctx.message.attachments else None
+        if not attachment and not url:
+            await ctx.reply("❌ Please attach a `.zip` archive to your message or specify a URL: `!check <url>`")
+            return
+
+        status_msg = await ctx.reply("⏳ Running mod pre-check...")
+        try:
+            if attachment:
+                if not attachment.filename.lower().endswith(".zip"):
+                    await status_msg.edit(content="❌ Attached file must be a `.zip` archive.")
+                    return
+                source_name = attachment.filename
+                zip_data = await attachment.read()
+            else:
+                source_name = url.split("/")[-1] or "mod.zip"
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                        if resp.status != 200:
+                            await status_msg.edit(content=f"❌ Failed to download archive (HTTP {resp.status})")
+                            return
+                        zip_data = await resp.read()
+
+            embed, files = await handle_self_check(zip_data, source_name, ctx.author)
+            await ctx.reply(embed=embed, files=files)
+            await status_msg.delete()
+        except Exception as e:
+            logger.exception(f"Error in !check: {e}")
+            await status_msg.edit(content=f"❌ Error during scan: {e}")
+
+    @bot.command(name="sync")
+    @commands.has_permissions(administrator=True)
+    async def sync_tree_command(ctx: commands.Context):
+        """Sync application commands with Discord (Admin only)."""
+        synced = await bot.tree.sync()
+        await ctx.reply(f"✅ Synced {len(synced)} application commands.")
 
     return bot
+

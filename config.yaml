@@ -44,7 +44,7 @@ pret_sources:
 # Archive safety limits
 archive:
   max_unpacked_size_mb: 500    # Maximum allowable total uncompressed size (MB)
-  max_file_count: 50000        # Maximum number of files in an archive
+  max_file_count: 130000        # Maximum number of files in an archive
   max_compression_ratio: 100.0 # Rejects archive if file > 5MB and ratio > 100:1
 
 # Static binary checks (Console ROM headers & Blacklists)

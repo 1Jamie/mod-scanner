@@ -194,36 +194,98 @@ paths:
 
 ---
 
-## CLI Usage
+## Developer Workflows & CI/CD Integration
 
-### Scan a Local Zip File
-```bash
-python -m mod_scanner.cli scan path/to/mod.zip
-```
-
-### Scan a Remote URL
-```bash
-python -m mod_scanner.cli scan https://example.com/downloads/mod_v1.0.zip
-```
-
-### Force Refresh Reference Assets
-Downloads and rebuilds `.cache/reference_hashes.json` from the upstream `pret` sources:
-```bash
-python -m mod_scanner.cli update-db
-```
-
-### Manage Approved Whitelist
-```bash
-# List all approved hashes
-python -m mod_scanner.cli whitelist list
-
-# Manually whitelist a hash
-python -m mod_scanner.cli whitelist add <hash_hex>
-```
+`mod-scanner` provides three ways for mod developers to verify their releases before publishing.
 
 ---
 
-## Discord Bot Setup
+### 1. Direct Directory Scanning (CLI)
+
+Mod authors can scan their active project directory or working tree directly without building a `.zip` archive first.
+
+```bash
+# Scan current directory
+mod-scanner scan .
+
+# Scan a specific mod working directory
+mod-scanner scan path/to/mod-source/
+
+# Scan with custom preview output folder
+mod-scanner scan path/to/mod-source/ --preview-dir ./my_diffs/
+
+# Exit with code 0 on flagged assets (only fail on hard ROM/rip violations)
+mod-scanner scan path/to/mod-source/ --no-fail-on-flagged
+```
+
+**CLI Exit Codes:**
+- `0`: Clean (passed all checks, or flagged with `--no-fail-on-flagged`).
+- `1`: Flagged (potential demakes or edits requiring review).
+- `2`: Rejected (prohibited ROM headers, blacklisted binaries, or direct rips detected).
+
+---
+
+### 2. GitHub Actions Integration (`action.yml`)
+
+Include `mod-scanner` in your mod repository CI/CD pipeline to automatically validate pull requests and release builds. The action automatically caches the reference database, posts a Markdown report to GitHub Step Summary, and uploads diff previews as workflow artifacts.
+
+#### Example Workflow (`.github/workflows/scan-mod.yml`):
+
+```yaml
+name: Scan Mod Release
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  mod-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Mod Repository
+        uses: actions/checkout@v4
+
+      - name: Run Mod Scanner
+        uses: 1Jamie/mod-scanner@main
+        with:
+          path: '.'
+          fail-on-flagged: 'true'
+          save-previews: 'true'
+          upload-artifacts: 'true'
+```
+
+#### Action Inputs:
+| Input | Description | Default |
+| :--- | :--- | :--- |
+| `path` | Path to directory or `.zip` file to scan | `.` |
+| `config` | Optional path to custom `config.yaml` | `""` |
+| `fail-on-flagged` | Fail step if assets are flagged for review (`true`/`false`) | `true` |
+| `save-previews` | Generate 3-panel PNG diff previews for flagged assets | `true` |
+| `upload-artifacts` | Upload diff previews as a GitHub Actions artifact | `true` |
+
+#### Action Outputs:
+| Output | Description |
+| :--- | :--- |
+| `verdict` | Final scan status (`CLEAN`, `FLAGGED`, or `REJECT`) |
+| `scanned-count` | Number of files scanned |
+| `violations-count` | Number of hard violations found |
+| `flags-count` | Number of flagged assets found |
+
+---
+
+### 3. Discord Self-Service Command (`/check-mod`)
+
+Mod creators can test their releases privately before posting to public forums or release channels:
+
+- **/check-mod [file] [url]**: Runs an ephemeral scan (visible only to the user who ran the command). If assets are flagged, the bot provides direct percentage similarity values and attaches a downloadable `.zip` diff bundle containing all side-by-side sprite comparisons.
+- **!check [url]**: Text command alternative for servers or direct messages.
+- **!sync**: Synchronizes slash commands across the guild (Admin only).
+
+---
+
+## Discord Bot Server Setup
 
 1. Go to the [Discord Developer Portal](https://discord.com/developers/applications).
 2. Create an Application and Bot.
@@ -237,7 +299,7 @@ python -m mod_scanner.cli whitelist add <hash_hex>
 python bot.py
 ```
 
-### How the Bot Handles Posts
+### How the Bot Handles Automated Uploads
 - **Forum Channels / Threads**: When a user creates a new thread in a monitored forum channel or posts a `.zip` in a thread, the bot scans the archive asynchronously without blocking Discord gateway heartbeats.
 - **Clean Submissions**: Adds a checkmark reaction (`✅`).
 - **Hard Violations (ROM dumps / Blacklisted headers / Rips)**: Adds a cross reaction (`❌`), DMs the author with specific reasons, and optionally removes the post if `auto_delete_violations: true`.
@@ -256,3 +318,4 @@ Run the automated test suite with pytest:
 ```bash
 python -m pytest -v
 ```
+

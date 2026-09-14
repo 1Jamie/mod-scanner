@@ -337,3 +337,134 @@ class ModScanner:
                 violations=[],
                 flags=[],
             )
+
+    def scan_directory_sync(self, dir_path: str | os.PathLike) -> ScanResult:
+        """
+        Synchronously scans an uncompressed project directory/working tree
+        through Tier 1 (Binary/ROM headers) and Tier 2 (Perceptual Image Hashing).
+        """
+        start_time = time.time()
+        violations: List[ScanViolation] = []
+        flags: List[ScanFlag] = []
+        root_path = Path(dir_path).resolve()
+
+        if not root_path.exists() or not root_path.is_dir():
+            return ScanResult(
+                status="REJECT",
+                summary=f"Target directory not found: {dir_path}",
+                scanned_file_count=0,
+                elapsed_seconds=round(time.time() - start_time, 3),
+                violations=[ScanViolation(file_path=str(dir_path), rule_type="FileSystem", message="Directory does not exist")],
+            )
+
+        ignored_dir_names = {
+            ".git", ".github", ".venv", "venv", "env", "node_modules",
+            "__pycache__", ".pytest_cache", ".cache", "scan_previews", "dist", "build"
+        }
+
+        scanned_files = 0
+
+        for root, dirs, files in os.walk(root_path):
+            # Exclude ignored directories in-place
+            dirs[:] = [d for d in dirs if d not in ignored_dir_names and not d.startswith(".")]
+
+            for file in files:
+                if file.startswith("."):
+                    continue
+
+                abs_file_path = Path(root) / file
+                rel_path = str(abs_file_path.relative_to(root_path))
+                scanned_files += 1
+                _, ext_lower = os.path.splitext(file)
+                ext_lower = ext_lower.lower()
+
+                # 1. Tier 1: Binary & Magic Byte Scan
+                try:
+                    with open(abs_file_path, "rb") as file_stream:
+                        binary_violation = check_file_stream_for_magic(
+                            stream=file_stream,
+                            filename=rel_path,
+                            rules=self.config.binary_rules,
+                        )
+                        if binary_violation:
+                            violations.append(
+                                ScanViolation(
+                                    file_path=rel_path,
+                                    rule_type="ConsoleROMHeader",
+                                    message=binary_violation.reason,
+                                )
+                            )
+                            continue
+                except Exception as e:
+                    logger.debug(f"Could not read file stream for {rel_path}: {e}")
+                    continue
+
+                # 2. Tier 2: Perceptual Image Hashing
+                if ext_lower in {".png", ".bmp", ".jpg", ".jpeg"}:
+                    try:
+                        with open(abs_file_path, "rb") as img_stream:
+                            raw_data = img_stream.read()
+                            img = Image.open(io.BytesIO(raw_data))
+                            img.load()
+                            _evaluate_image_against_reference_db(img, rel_path, self, violations, flags)
+                    except Exception as e:
+                        logger.debug(f"Could not parse image {rel_path}: {e}")
+
+                # 3. Embedded Image scanning in Binary Container packages
+                elif ext_lower in CONTAINER_PACKAGE_EXTENSIONS:
+                    try:
+                        with open(abs_file_path, "rb") as pkg_stream:
+                            raw_pkg_data = pkg_stream.read()
+                            embedded_pngs = _extract_embedded_pngs(raw_pkg_data)
+                            for offset, emb_img in embedded_pngs:
+                                _evaluate_image_against_reference_db(
+                                    emb_img,
+                                    f"{rel_path} [embedded PNG @ 0x{offset:X}]",
+                                    self,
+                                    violations,
+                                    flags,
+                                )
+                    except Exception as e:
+                        logger.debug(f"Could not parse binary package {rel_path}: {e}")
+
+        elapsed = round(time.time() - start_time, 3)
+
+        if violations:
+            return ScanResult(
+                status="REJECT",
+                summary=f"Found {len(violations)} prohibited asset/ROM violation(s)",
+                scanned_file_count=scanned_files,
+                elapsed_seconds=elapsed,
+                violations=violations,
+                flags=flags,
+            )
+        elif flags:
+            return ScanResult(
+                status="FLAGGED",
+                summary=f"Found {len(flags)} asset(s) with high similarity needing moderator review",
+                scanned_file_count=scanned_files,
+                elapsed_seconds=elapsed,
+                violations=violations,
+                flags=flags,
+            )
+        else:
+            return ScanResult(
+                status="CLEAN",
+                summary=f"Scan complete: {scanned_files} files checked, no violations found.",
+                scanned_file_count=scanned_files,
+                elapsed_seconds=elapsed,
+                violations=[],
+                flags=[],
+            )
+
+    def scan_target_sync(self, target: str | os.PathLike | bytes | BinaryIO) -> ScanResult:
+        """
+        Scans a target, automatically detecting whether it is a directory path,
+        a zip archive path, a byte string, or a file-like stream.
+        """
+        if isinstance(target, (str, os.PathLike)):
+            p = Path(target)
+            if p.is_dir():
+                return self.scan_directory_sync(p)
+            return self.scan_archive_sync(p)
+        return self.scan_archive_sync(target)

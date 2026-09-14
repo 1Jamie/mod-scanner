@@ -103,3 +103,51 @@ def test_whitelist_allows_previously_flagged(mock_scanner):
 
     result = mock_scanner.scan_archive_sync(zip_buf.getvalue())
     assert result.is_clean
+
+
+def test_pipeline_directory_scan_clean(mock_scanner, tmp_path):
+    mod_dir = tmp_path / "clean_mod_repo"
+    mod_dir.mkdir()
+    (mod_dir / "textures").mkdir()
+    (mod_dir / "README.md").write_text("# My Clean Mod")
+
+    square_img = Image.new("RGBA", (56, 56), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(square_img)
+    draw.rectangle((5, 5, 50, 50), fill=(0, 255, 0, 255))
+    square_img.save(mod_dir / "textures" / "custom_block.png")
+
+    result = mock_scanner.scan_directory_sync(mod_dir)
+    assert result.is_clean
+    assert result.scanned_file_count == 2
+
+
+def test_pipeline_directory_scan_reject(mock_scanner, tmp_path):
+    mod_dir = tmp_path / "violation_mod_repo"
+    mod_dir.mkdir()
+    (mod_dir / "roms").mkdir()
+
+    header = bytearray(512)
+    gba_logo = bytes.fromhex("24ffae51699aa2213d84820a84e409ad")
+    header[0x0004 : 0x0004 + len(gba_logo)] = gba_logo
+    (mod_dir / "roms" / "game.bin").write_bytes(bytes(header))
+
+    result = mock_scanner.scan_directory_sync(mod_dir)
+    assert result.is_rejected
+    assert len(result.violations) == 1
+
+
+def test_scan_target_sync_dispatch(mock_scanner, tmp_path):
+    # Test dispatch on directory
+    mod_dir = tmp_path / "dispatch_dir"
+    mod_dir.mkdir()
+    (mod_dir / "test.txt").write_text("hello")
+    res_dir = mock_scanner.scan_target_sync(mod_dir)
+    assert res_dir.is_clean
+
+    # Test dispatch on zip
+    zip_path = tmp_path / "dispatch.zip"
+    with zipfile.ZipFile(zip_path, "w") as z:
+        z.writestr("test.txt", b"hello")
+    res_zip = mock_scanner.scan_target_sync(zip_path)
+    assert res_zip.is_clean
+
