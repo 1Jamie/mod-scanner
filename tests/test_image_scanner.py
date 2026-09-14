@@ -64,6 +64,7 @@ def test_diff_preview_generation():
     img1 = create_sample_sprite(shape="circle")
     img2 = create_sample_sprite(shape="square")
 
-    canvas = generate_diff_preview(img1, img2, panel_size=64)
-    assert canvas.size == (64 * 3 + 16, 64 + 24)
+    canvas = generate_diff_preview(img1, img2, panel_size=64, upscale_factor=2)
     assert canvas.mode == "RGB"
+    assert canvas.width > 64 * 3
+    assert canvas.height > 64

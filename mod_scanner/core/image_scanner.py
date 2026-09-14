@@ -68,40 +68,77 @@ def calculate_hamming_distance(hex_hash1: str, hex_hash2: str) -> int:
     return bin(val1 ^ val2).count("1")
 
 
+def _fit_image_centered(
+    img: Image.Image,
+    target_size: Tuple[int, int],
+    bg_color: Tuple[int, int, int, int]
+) -> Image.Image:
+    """
+    Places an image centered onto a target canvas without stretching or altering pixel aspect ratios.
+    Preserves exact 1:1 pixel art placement.
+    """
+    canvas = Image.new("RGBA", target_size, bg_color)
+    img_rgba = img.convert("RGBA")
+
+    # If image fits inside canvas, center 1:1 to preserve native pixel steps
+    if img_rgba.width <= target_size[0] and img_rgba.height <= target_size[1]:
+        offset_x = (target_size[0] - img_rgba.width) // 2
+        offset_y = (target_size[1] - img_rgba.height) // 2
+        canvas.alpha_composite(img_rgba, (offset_x, offset_y))
+    else:
+        # Scale down only if image is larger than target canvas, strictly preserving aspect ratio
+        scale = min(target_size[0] / img_rgba.width, target_size[1] / img_rgba.height)
+        new_w = max(1, int(img_rgba.width * scale))
+        new_h = max(1, int(img_rgba.height * scale))
+        resized = img_rgba.resize((new_w, new_h), Image.Resampling.NEAREST)
+        offset_x = (target_size[0] - new_w) // 2
+        offset_y = (target_size[1] - new_h) // 2
+        canvas.alpha_composite(resized, (offset_x, offset_y))
+
+    return canvas
+
+
 def generate_diff_preview(
     mod_img: Image.Image,
     ref_img: Image.Image,
-    panel_size: int = 64
+    panel_size: int = 64,
+    upscale_factor: int = 2
 ) -> Image.Image:
     """
     Generates a crisp 3-panel comparison preview:
     [ Mod Asset ] [ Canonical Reference ] [ Pixel Difference ]
-    Resized using NEAREST neighbor to preserve pixel art fidelity.
+    Sprites are centered 1:1 to prevent distortion or uneven pixel scaling.
+    The resulting canvas is upscaled by upscale_factor using nearest-neighbor for crisp display.
     """
-    size = (panel_size, panel_size)
+    # Determine base panel dimensions
+    base_dim = max(panel_size, mod_img.width, mod_img.height, ref_img.width, ref_img.height)
+    # Align to standard size (e.g. 64x64 or 80x80)
+    base_dim = ((base_dim + 7) // 8) * 8
+    target_size = (base_dim, base_dim)
 
-    # 1. Normalize both images for visual comparison
-    mod_norm = Image.new("RGBA", size, (35, 39, 42, 255))
-    ref_norm = Image.new("RGBA", size, (35, 39, 42, 255))
-
-    # Resize preserving aspect ratio or fitting
-    mod_resized = mod_img.convert("RGBA").resize(size, Image.Resampling.NEAREST)
-    ref_resized = ref_img.convert("RGBA").resize(size, Image.Resampling.NEAREST)
-
-    mod_norm.alpha_composite(mod_resized)
-    ref_norm.alpha_composite(ref_resized)
+    # 1. Center both images without stretching pixels
+    mod_norm = _fit_image_centered(mod_img, target_size, (35, 39, 42, 255))
+    ref_norm = _fit_image_centered(ref_img, target_size, (35, 39, 42, 255))
 
     # 2. Compute visual difference
     diff = ImageChops.difference(mod_norm.convert("RGB"), ref_norm.convert("RGB"))
 
-    # 3. Assemble 3-panel canvas
-    canvas_width = panel_size * 3 + 16  # 16px padding between panels
-    canvas_height = panel_size + 24     # header/footer space
+    # 3. Assemble 3-panel base canvas
+    pad = 4
+    canvas_width = base_dim * 3 + pad * 4
+    canvas_height = base_dim + pad * 2
     canvas = Image.new("RGB", (canvas_width, canvas_height), (24, 25, 28))
 
     # Paste panels
-    canvas.paste(mod_norm.convert("RGB"), (4, 12))
-    canvas.paste(ref_norm.convert("RGB"), (panel_size + 8, 12))
-    canvas.paste(diff, (panel_size * 2 + 12, 12))
+    canvas.paste(mod_norm.convert("RGB"), (pad, pad))
+    canvas.paste(ref_norm.convert("RGB"), (base_dim + pad * 2, pad))
+    canvas.paste(diff, (base_dim * 2 + pad * 3, pad))
+
+    # 4. Upscale for crisp presentation on high-DPI and Discord embeds
+    if upscale_factor > 1:
+        canvas = canvas.resize(
+            (canvas.width * upscale_factor, canvas.height * upscale_factor),
+            Image.Resampling.NEAREST
+        )
 
     return canvas
