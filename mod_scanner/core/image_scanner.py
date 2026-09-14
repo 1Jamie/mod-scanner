@@ -7,7 +7,7 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass
 from typing import Optional, Tuple
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageDraw
 import imagehash
 from ..config import ImageRules
 
@@ -68,16 +68,28 @@ def calculate_hamming_distance(hex_hash1: str, hex_hash2: str) -> int:
     return bin(val1 ^ val2).count("1")
 
 
+def _create_checkerboard_panel(size: Tuple[int, int], grid_size: int = 8) -> Image.Image:
+    """Creates a subtle light-gray neutral backdrop suitable for both 2bpp monochrome and color sprites."""
+    panel = Image.new("RGBA", size, (238, 241, 246, 255))
+    draw = ImageDraw.Draw(panel)
+    c1 = (238, 241, 246, 255)
+    c2 = (226, 232, 240, 255)
+    for y in range(0, size[1], grid_size):
+        for x in range(0, size[0], grid_size):
+            if ((x // grid_size) + (y // grid_size)) % 2 == 1:
+                draw.rectangle((x, y, x + grid_size - 1, y + grid_size - 1), fill=c2)
+    return panel
+
+
 def _fit_image_centered(
     img: Image.Image,
-    target_size: Tuple[int, int],
-    bg_color: Tuple[int, int, int, int]
+    target_size: Tuple[int, int]
 ) -> Image.Image:
     """
-    Places an image centered onto a target canvas without stretching or altering pixel aspect ratios.
-    Preserves exact 1:1 pixel art placement.
+    Places an image centered onto a checkerboard canvas without stretching or altering pixel aspect ratios.
+    Preserves exact 1:1 pixel art placement and ensures transparent 2bpp outlines remain sharp.
     """
-    canvas = Image.new("RGBA", target_size, bg_color)
+    canvas = _create_checkerboard_panel(target_size)
     img_rgba = img.convert("RGBA")
 
     # If image fits inside canvas, center 1:1 to preserve native pixel steps
@@ -107,18 +119,16 @@ def generate_diff_preview(
     """
     Generates a crisp 3-panel comparison preview:
     [ Mod Asset ] [ Canonical Reference ] [ Pixel Difference ]
-    Sprites are centered 1:1 to prevent distortion or uneven pixel scaling.
-    The resulting canvas is upscaled by upscale_factor using nearest-neighbor for crisp display.
+    Sprites are centered 1:1 on neutral background to prevent outline clipping or stretching.
     """
     # Determine base panel dimensions
     base_dim = max(panel_size, mod_img.width, mod_img.height, ref_img.width, ref_img.height)
-    # Align to standard size (e.g. 64x64 or 80x80)
     base_dim = ((base_dim + 7) // 8) * 8
     target_size = (base_dim, base_dim)
 
-    # 1. Center both images without stretching pixels
-    mod_norm = _fit_image_centered(mod_img, target_size, (35, 39, 42, 255))
-    ref_norm = _fit_image_centered(ref_img, target_size, (35, 39, 42, 255))
+    # 1. Center both images on neutral high-contrast checkerboard panels
+    mod_norm = _fit_image_centered(mod_img, target_size)
+    ref_norm = _fit_image_centered(ref_img, target_size)
 
     # 2. Compute visual difference
     diff = ImageChops.difference(mod_norm.convert("RGB"), ref_norm.convert("RGB"))

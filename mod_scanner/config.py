@@ -38,9 +38,16 @@ class ArchiveConfig:
 
 
 @dataclass
+class ContainedSignatureRule:
+    name: str
+    raw_bytes: bytes
+
+
+@dataclass
 class BinaryRules:
     blacklisted_extensions: List[str] = field(default_factory=list)
     magic_bytes: List[MagicByteRule] = field(default_factory=list)
+    contained_signatures: List[ContainedSignatureRule] = field(default_factory=list)
 
 
 @dataclass
@@ -128,9 +135,9 @@ class Config:
         # Archive
         arc_data = raw_data.get("archive", {})
         archive = ArchiveConfig(
-            max_unpacked_size_mb=int(arc_data.get("max_unpacked_size_mb", 250)),
-            max_file_count=int(arc_data.get("max_file_count", 5000)),
-            max_compression_ratio=float(arc_data.get("max_compression_ratio", 20.0)),
+            max_unpacked_size_mb=int(arc_data.get("max_unpacked_size_mb", 500)),
+            max_file_count=int(arc_data.get("max_file_count", 50000)),
+            max_compression_ratio=float(arc_data.get("max_compression_ratio", 100.0)),
         )
 
         # Binary rules
@@ -151,7 +158,31 @@ class Config:
                     )
                 except ValueError:
                     pass
-        binary_rules = BinaryRules(blacklisted_extensions=exts, magic_bytes=magic_rules)
+
+        contained_rules = []
+        for c in bin_data.get("contained_signatures", []):
+            raw_b = None
+            if "hex" in c and c["hex"]:
+                try:
+                    raw_b = bytes.fromhex(c["hex"].replace(" ", "").strip())
+                except ValueError:
+                    pass
+            elif "pattern" in c and c["pattern"]:
+                raw_b = c["pattern"].encode("utf-8")
+
+            if raw_b:
+                contained_rules.append(
+                    ContainedSignatureRule(
+                        name=c.get("name", "Unknown contained signature"),
+                        raw_bytes=raw_b,
+                    )
+                )
+
+        binary_rules = BinaryRules(
+            blacklisted_extensions=exts,
+            magic_bytes=magic_rules,
+            contained_signatures=contained_rules,
+        )
 
         # Image rules
         img_data = raw_data.get("image_rules", {})
@@ -159,8 +190,8 @@ class Config:
         image_rules = ImageRules(
             hash_type=img_data.get("hash_type", "dhash"),
             hash_size=int(img_data.get("hash_size", 16)),
-            threshold_auto_reject=int(thresholds.get("auto_reject", 8)),
-            threshold_flag_for_review=int(thresholds.get("flag_for_review", 28)),
+            threshold_auto_reject=int(thresholds.get("auto_reject", 14)),
+            threshold_flag_for_review=int(thresholds.get("flag_for_review", 30)),
             generate_diff_preview=bool(img_data.get("generate_diff_preview", True)),
             preview_panel_size=int(img_data.get("preview_panel_size", 64)),
         )

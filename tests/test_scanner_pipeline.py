@@ -62,9 +62,10 @@ def test_pipeline_clean_mod(mock_scanner):
 
 
 def test_pipeline_reject_rom_header(mock_scanner):
-    # Zip containing file with GBA fixed complement byte
+    # Zip containing file with GBA Nintendo logo header
     header = bytearray(512)
-    header[0x00B2] = 0x96
+    gba_logo = bytes.fromhex("24ffae51699aa2213d84820a84e409ad")
+    header[0x0004 : 0x0004 + len(gba_logo)] = gba_logo
 
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w") as z:

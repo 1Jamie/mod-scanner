@@ -29,15 +29,25 @@ def test_gb_nintendo_logo_detected(binary_rules):
     assert "Game Boy" in violation.rule_name
 
 
-def test_gba_fixed_byte_detected(binary_rules):
-    # GBA 0x96 at 0x00B2
+def test_gba_logo_header_detected(binary_rules):
+    # GBA Nintendo logo header at 0x0004
     header = bytearray(512)
-    header[0x00B2] = 0x96
+    gba_logo = bytes.fromhex("24ffae51699aa2213d84820a84e409ad")
+    header[0x0004 : 0x0004 + len(gba_logo)] = gba_logo
 
     stream = io.BytesIO(header)
     violation = check_file_stream_for_magic(stream, "asset.dat", binary_rules)
     assert violation is not None
     assert "GBA" in violation.rule_name
+
+
+def test_contained_signature_detected(binary_rules):
+    # Embedded 3DS bcres package in custom binary file
+    payload = b"RPII1\x00\x00\x00\x98\x00\x00\x000\x00\x00\x00AABO.bcres.cx\x00\x00"
+    stream = io.BytesIO(payload)
+    violation = check_file_stream_for_magic(stream, "assets/rumble_pii.pack", binary_rules)
+    assert violation is not None
+    assert "bcres" in violation.rule_name
 
 
 def test_n64_magic_detected(binary_rules):

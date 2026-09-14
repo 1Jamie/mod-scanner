@@ -126,6 +126,14 @@ def index_pret_archive(
             try:
                 img = Image.open(f)
                 img.load()  # Force load into memory before closing f
+
+                # Filter out tiny icon slices (< 16x16) and solid single-color blank strips
+                if img.width < 16 or img.height < 16:
+                    continue
+                extrema = img.convert("L").getextrema()
+                if extrema[0] == extrema[1]:
+                    continue
+
                 h_str = compute_image_hash(
                     img,
                     hash_size=image_rules_config.hash_size,

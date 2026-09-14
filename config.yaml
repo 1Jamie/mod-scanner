@@ -26,6 +26,13 @@ pret_sources:
       - "gfx/sprites/**/*.png"
       - "gfx/pokemon/**/*.png"
       - "gfx/trainers/**/*.png"
+  - name: "pokecrystal"
+    repo: "pret/pokecrystal"
+    branch: "master"
+    image_patterns:
+      - "gfx/pokemon/**/front.png"
+      - "gfx/pokemon/**/back.png"
+      - "gfx/trainers/**/*.png"
   - name: "pokefirered"
     repo: "pret/pokefirered"
     branch: "master"
@@ -33,12 +40,6 @@ pret_sources:
       - "graphics/pokemon/**/front.png"
       - "graphics/pokemon/**/back.png"
       - "graphics/trainers/**/*.png"
-  - name: "pokeheartgold"
-    repo: "pret/pokeheartgold"
-    branch: "master"
-    image_patterns:
-      - "files/graphic/**/*.png"
-      - "src/data/graphics/**/*.png"
 
 # Archive safety limits
 archive:
@@ -71,9 +72,6 @@ binary_rules:
     - name: "GBA Nintendo Logo Header"
       offset: 0x0004
       hex: "24ffae51699aa2213d84820a84e409ad"
-    - name: "GBA Fixed Complement Byte"
-      offset: 0x00B2
-      hex: "96"
     - name: "N64 ROM (Big Endian)"
       offset: 0x0000
       hex: "80371240"
@@ -104,6 +102,39 @@ binary_rules:
     - name: "Nintendo Switch XCI (HFS0)"
       offset: 0x0000
       hex: "48465330" # "HFS0"
+
+  # Deep signatures searched anywhere within binary packages (.pack, .dat, .bin, .pak, .bundle, etc.)
+  contained_signatures:
+    - name: "Nintendo 3DS Binary Resource (.bcres)"
+      pattern: ".bcres"
+    - name: "Nintendo 3DS Binary Model (.bcmdl)"
+      pattern: ".bcmdl"
+    - name: "Nintendo 3DS Binary Texture (.bctex)"
+      pattern: ".bctex"
+    - name: "Nintendo 3DS CGFX Model Header"
+      pattern: "CGFX"
+    - name: "Nintendo 3DS BCH Model Header"
+      hex: "42434800" # "BCH\0"
+    - name: "NintendoWare for CTR (3DS)"
+      pattern: "NW4C"
+    - name: "Nintendo Switch Binary Texture (BNTX)"
+      pattern: "BNTX"
+    - name: "Nintendo Switch / Wii U Binary Resource (.bfres)"
+      pattern: ".bfres"
+    - name: "Nintendo SARC Archive"
+      pattern: "SARC"
+    - name: "Nintendo Yaz0 Compressed Stream"
+      pattern: "Yaz0"
+    - name: "Nintendo DS NARC Archive"
+      pattern: "NARC"
+    - name: "Nintendo DS Character Graphics (NCGR)"
+      pattern: "NCGR"
+    - name: "Nintendo DS Color Palette (NCLR)"
+      pattern: "NCLR"
+    - name: "Nintendo DS Screen Resource (NSCR)"
+      pattern: "NSCR"
+    - name: "Nintendo 3DS RomFS IVFC"
+      pattern: "IVFC"
 
 # Perceptual Image Matching (256-bit dHash)
 image_rules:

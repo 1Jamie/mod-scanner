@@ -12,7 +12,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, BinaryIO, Dict, List, Optional, Set
+from typing import Any, BinaryIO, Dict, List, Optional, Set, Tuple
 from PIL import Image
 
 from .config import Config
@@ -27,6 +27,8 @@ from .core.image_scanner import (
 from .pret_fetcher import ReferenceDatabase, load_or_fetch_reference_database
 
 logger = logging.getLogger("mod_scanner.scanner")
+
+CONTAINER_PACKAGE_EXTENSIONS = {".pack", ".dat", ".pak", ".bundle", ".bin", ".arc", ".res"}
 
 
 @dataclass
@@ -103,6 +105,105 @@ class WhitelistManager:
             }, f, indent=2)
 
 
+def _extract_embedded_pngs(data: bytes, max_images: int = 100) -> List[Tuple[int, Image.Image]]:
+    """Extracts embedded PNG streams from packed binary files (.pack, .dat, .pak, etc.)."""
+    png_magic = b"\x89PNG\r\n\x1a\n"
+    iend_magic = b"IEND\xaeB\x60\x82"
+    images = []
+    idx = 0
+    while len(images) < max_images:
+        start = data.find(png_magic, idx)
+        if start == -1:
+            break
+        end = data.find(iend_magic, start)
+        if end == -1:
+            break
+        end += len(iend_magic)
+        png_bytes = data[start:end]
+        try:
+            img = Image.open(io.BytesIO(png_bytes))
+            img.load()
+            images.append((start, img))
+        except Exception:
+            pass
+        idx = end
+    return images
+
+
+def _evaluate_image_against_reference_db(
+    img: Image.Image,
+    filename_label: str,
+    scanner: ModScanner,
+    violations: List[ScanViolation],
+    flags: List[ScanFlag],
+):
+    """Computes image hash, checks whitelist, and evaluates similarity against reference DB."""
+    try:
+        # Ignore sub-16px helper slices and solid single-color masks
+        if img.width < 16 or img.height < 16:
+            return
+        extrema = img.convert("L").getextrema()
+        if extrema[0] == extrema[1]:
+            return
+
+        mod_hash = compute_image_hash(
+            img,
+            hash_size=scanner.config.image_rules.hash_size,
+            hash_type=scanner.config.image_rules.hash_type,
+        )
+
+        if scanner.whitelist.is_approved(mod_hash):
+            return
+
+        best_match_key = None
+        best_distance = 999999
+        best_ref_hash = None
+
+        for ref_key, ref_hash in scanner.ref_db.hashes.items():
+            dist = calculate_hamming_distance(mod_hash, ref_hash)
+            if dist < best_distance:
+                best_distance = dist
+                best_match_key = ref_key
+                best_ref_hash = ref_hash
+                if dist == 0:
+                    break
+
+        if best_match_key and best_distance <= scanner.config.image_rules.threshold_auto_reject:
+            violations.append(
+                ScanViolation(
+                    file_path=filename_label,
+                    rule_type="DirectAssetRip",
+                    message=f"Image matches canonical asset '{best_match_key}' (Hamming Distance: {best_distance}/{scanner.config.image_rules.hash_size ** 2})",
+                )
+            )
+        elif best_match_key and best_distance <= scanner.config.image_rules.threshold_flag_for_review:
+            preview_bytes = None
+            if scanner.config.image_rules.generate_diff_preview:
+                ref_img = scanner.ref_db.get_reference_image(best_match_key)
+                if ref_img:
+                    preview_canvas = generate_diff_preview(
+                        mod_img=img,
+                        ref_img=ref_img,
+                        panel_size=scanner.config.image_rules.preview_panel_size,
+                    )
+                    buf = io.BytesIO()
+                    preview_canvas.save(buf, format="PNG")
+                    preview_bytes = buf.getvalue()
+
+            flags.append(
+                ScanFlag(
+                    file_path=filename_label,
+                    matched_ref=best_match_key,
+                    hamming_distance=best_distance,
+                    mod_hash=mod_hash,
+                    ref_hash=best_ref_hash or "",
+                    preview_bytes=preview_bytes,
+                )
+            )
+    except Exception as e:
+        logger.debug(f"Could not evaluate image {filename_label}: {e}")
+
+
 class ModScanner:
     """
     Main scanner instance holding configuration and reference bank.
@@ -155,6 +256,8 @@ class ModScanner:
 
                 filename = zinfo.filename
                 scanned_files += 1
+                _, ext_lower = os.path.splitext(filename)
+                ext_lower = ext_lower.lower()
 
                 # 2. Tier 1: Binary & Magic Byte Scan (Streamed chunk)
                 with z.open(zinfo, "r") as file_stream:
@@ -175,73 +278,33 @@ class ModScanner:
                         continue
 
                 # 3. Tier 2: Perceptual Image Hashing (PNG, BMP, JPG)
-                if filename.lower().endswith((".png", ".bmp", ".jpg", ".jpeg")):
+                if ext_lower in {".png", ".bmp", ".jpg", ".jpeg"}:
                     try:
                         with z.open(zinfo, "r") as img_stream:
                             raw_data = img_stream.read()
                             img = Image.open(io.BytesIO(raw_data))
                             img.load()
-
-                            mod_hash = compute_image_hash(
-                                img,
-                                hash_size=self.config.image_rules.hash_size,
-                                hash_type=self.config.image_rules.hash_type,
-                            )
-
-                            # Skip if this asset has been whitelisted by a moderator
-                            if self.whitelist.is_approved(mod_hash):
-                                continue
-
-                            # Find closest matching reference asset
-                            best_match_key = None
-                            best_distance = 999999
-                            best_ref_hash = None
-
-                            for ref_key, ref_hash in self.ref_db.hashes.items():
-                                dist = calculate_hamming_distance(mod_hash, ref_hash)
-                                if dist < best_distance:
-                                    best_distance = dist
-                                    best_match_key = ref_key
-                                    best_ref_hash = ref_hash
-                                    if dist == 0:
-                                        break
-
-                            # Evaluate thresholds
-                            if best_match_key and best_distance <= self.config.image_rules.threshold_auto_reject:
-                                violations.append(
-                                    ScanViolation(
-                                        file_path=filename,
-                                        rule_type="DirectAssetRip",
-                                        message=f"Image matches canonical asset '{best_match_key}' (Hamming Distance: {best_distance}/{self.config.image_rules.hash_size ** 2})",
-                                    )
-                                )
-                            elif best_match_key and best_distance <= self.config.image_rules.threshold_flag_for_review:
-                                # Generate 3-panel diff preview
-                                preview_bytes = None
-                                if self.config.image_rules.generate_diff_preview:
-                                    ref_img = self.ref_db.get_reference_image(best_match_key)
-                                    if ref_img:
-                                        preview_canvas = generate_diff_preview(
-                                            mod_img=img,
-                                            ref_img=ref_img,
-                                            panel_size=self.config.image_rules.preview_panel_size,
-                                        )
-                                        buf = io.BytesIO()
-                                        preview_canvas.save(buf, format="PNG")
-                                        preview_bytes = buf.getvalue()
-
-                                flags.append(
-                                    ScanFlag(
-                                        file_path=filename,
-                                        matched_ref=best_match_key,
-                                        hamming_distance=best_distance,
-                                        mod_hash=mod_hash,
-                                        ref_hash=best_ref_hash or "",
-                                        preview_bytes=preview_bytes,
-                                    )
-                                )
+                            _evaluate_image_against_reference_db(img, filename, self, violations, flags)
                     except Exception as e:
                         logger.debug(f"Could not parse image {filename}: {e}")
+
+                # 4. Embedded Image scanning in Binary Container packages (.pack, .dat, .pak, etc.)
+                elif ext_lower in CONTAINER_PACKAGE_EXTENSIONS:
+                    try:
+                        with z.open(zinfo, "r") as pkg_stream:
+                            raw_pkg_data = pkg_stream.read()
+                            embedded_pngs = _extract_embedded_pngs(raw_pkg_data)
+                            for offset, emb_img in embedded_pngs:
+                                _evaluate_image_against_reference_db(
+                                    emb_img,
+                                    f"{filename} [embedded PNG @ 0x{offset:X}]",
+                                    self,
+                                    violations,
+                                    flags,
+                                )
+                    except Exception as e:
+                        logger.debug(f"Could not parse binary package {filename}: {e}")
+
         finally:
             z.close()
 
