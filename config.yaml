@@ -1,0 +1,137 @@
+# ====================================================================
+# Mod Scanner Configuration
+# ====================================================================
+
+# Optional GitHub Token to bypass unauthenticated 60 req/hr rate limit
+# (Can also be provided via GITHUB_TOKEN environment variable)
+github_token: ""
+
+# Concurrency & Worker limits (prevents OOM under concurrent mod uploads)
+concurrency:
+  max_workers: 2               # Recommended: 2-4 worker processes
+
+# Upstream decomp repositories to pull canonical reference assets from on first run
+pret_sources:
+  - name: "pokered"
+    repo: "pret/pokered"
+    branch: "master"
+    image_patterns:
+      - "gfx/sprites/**/*.png"
+      - "gfx/pokemon/**/*.png"
+      - "gfx/trainers/**/*.png"
+  - name: "pokeyellow"
+    repo: "pret/pokeyellow"
+    branch: "master"
+    image_patterns:
+      - "gfx/sprites/**/*.png"
+      - "gfx/pokemon/**/*.png"
+      - "gfx/trainers/**/*.png"
+  - name: "pokefirered"
+    repo: "pret/pokefirered"
+    branch: "master"
+    image_patterns:
+      - "graphics/pokemon/**/front.png"
+      - "graphics/pokemon/**/back.png"
+      - "graphics/trainers/**/*.png"
+  - name: "pokeheartgold"
+    repo: "pret/pokeheartgold"
+    branch: "master"
+    image_patterns:
+      - "files/graphic/**/*.png"
+      - "src/data/graphics/**/*.png"
+
+# Archive safety limits
+archive:
+  max_unpacked_size_mb: 500    # Maximum allowable total uncompressed size (MB)
+  max_file_count: 50000        # Maximum number of files in an archive
+  max_compression_ratio: 20.0  # Rejects archive if unpacked_size / compressed_size > ratio
+
+# Static binary checks (Console ROM headers & Blacklists)
+binary_rules:
+  blacklisted_extensions:
+    - ".gb"
+    - ".gbc"
+    - ".gba"
+    - ".nds"
+    - ".3ds"
+    - ".cia"
+    - ".cxi"
+    - ".z64"
+    - ".n64"
+    - ".v64"
+    - ".iso"
+    - ".wbfs"
+    - ".wad"
+    - ".nsp"
+    - ".xci"
+  magic_bytes:
+    - name: "Game Boy / GBC Nintendo Logo"
+      offset: 0x0104
+      hex: "ceed6666cc0d000b03730083000c000d0008111f8889000eaccf"
+    - name: "GBA Nintendo Logo Header"
+      offset: 0x0004
+      hex: "24ffae51699aa2213d84820a84e409ad"
+    - name: "GBA Fixed Complement Byte"
+      offset: 0x00B2
+      hex: "96"
+    - name: "N64 ROM (Big Endian)"
+      offset: 0x0000
+      hex: "80371240"
+    - name: "N64 ROM (Byte-swapped)"
+      offset: 0x0000
+      hex: "37804012"
+    - name: "N64 ROM (Little Endian)"
+      offset: 0x0000
+      hex: "40123780"
+    - name: "GameCube / Wii Disc Magic"
+      offset: 0x001C
+      hex: "c2339f3d"
+    - name: "Nintendo DS Logo Header"
+      offset: 0x00C0
+      hex: "24ffae51699aa2213d84820a84e409ad"
+    - name: "Nintendo DS Logo CRC"
+      offset: 0x015C
+      hex: "cf56"
+    - name: "3DS NCCH Partition"
+      offset: 0x0100
+      hex: "4e434348" # "NCCH"
+    - name: "3DS NCSD Header"
+      offset: 0x0100
+      hex: "4e435344" # "NCSD"
+    - name: "Nintendo Switch NSP (PFS0)"
+      offset: 0x0000
+      hex: "50465330" # "PFS0"
+    - name: "Nintendo Switch XCI (HFS0)"
+      offset: 0x0000
+      hex: "48465330" # "HFS0"
+
+# Perceptual Image Matching (256-bit dHash)
+image_rules:
+  hash_type: "dhash"
+  hash_size: 16               # 16x16 = 256 bits for high-detail pixel art
+  thresholds:
+    auto_reject: 14           # Hamming distance 0-14: Auto-reject (Direct rip / simple recolor)
+    flag_for_review: 30       # Hamming distance 15-30: Flag for review (Demake / high similarity)
+    # Hamming distance > 30: Distinct custom artwork (Pass)
+  generate_diff_preview: true # Generate [Mod] [Ref] [Pixel Diff] image for flagged items
+  preview_panel_size: 64      # Pixel dimensions for each preview panel
+
+# Discord Bot integration settings
+discord:
+  token: ""                   # Or set DISCORD_BOT_TOKEN environment variable
+  guild_id: 0
+  # List of Forum Channel or Text Channel IDs to monitor (empty list = monitor all accessible channels)
+  monitored_channel_ids: []
+  # Target channel where review embeds and diff bundles are sent for moderators
+  mod_review_channel_id: 0
+  # Maximum number of top match previews to display in the main embed
+  max_embed_items: 4
+  # Attach an in-memory .zip bundle containing all 3-panel diff PNGs and a text summary report
+  attach_diff_bundle_zip: true
+  # If true, automatically removes violating posts from the public mod channel/thread
+  auto_delete_violations: false
+
+# Local storage paths
+paths:
+  cache_dir: "./.cache"
+  whitelist_file: "./whitelist.json"
