@@ -173,6 +173,66 @@ def generate_diff_preview(
     return canvas
 
 
+CONTAINER_PACKAGE_EXTENSIONS = {".pack", ".dat", ".pak", ".bundle", ".bin", ".arc", ".res", ".fsys", ".rarc"}
+
+
+def _parse_image_from_bytes(raw_data: bytes, ext_lower: str) -> Optional[Image.Image]:
+    """Attempts to parse raw bytes into a Pillow Image from standard formats or raw buffers."""
+    if ext_lower in IMAGE_EXTENSIONS:
+        try:
+            img = Image.open(io.BytesIO(raw_data))
+            img.load()
+            return img
+        except Exception:
+            return None
+    elif ext_lower in RAW_TEXTURE_EXTENSIONS:
+        length = len(raw_data)
+        if ext_lower in {".rgba", ".bgra", ".raw"} and length >= 64:
+            w = int(math.isqrt(length // 4))
+            if w * w * 4 == length:
+                try:
+                    mode = "RGBA" if ext_lower in {".rgba", ".raw"} else "BGRA"
+                    img = Image.frombytes(mode, (w, w), raw_data)
+                    if mode == "BGRA":
+                        img = img.convert("RGBA")
+                    return img
+                except Exception:
+                    return None
+        elif ext_lower == ".rgb" and length >= 48:
+            w = int(math.isqrt(length // 3))
+            if w * w * 3 == length:
+                try:
+                    return Image.frombytes("RGB", (w, w), raw_data)
+                except Exception:
+                    return None
+    return None
+
+
+def _extract_embedded_pngs(data: bytes, max_images: int = 100) -> List[Tuple[int, Image.Image]]:
+    """Extracts embedded PNG streams from packed binary files (.pack, .dat, .pak, etc.)."""
+    png_magic = b"\x89PNG\r\n\x1a\n"
+    iend_magic = b"IEND\xaeB\x60\x82"
+    images = []
+    idx = 0
+    while len(images) < max_images:
+        start = data.find(png_magic, idx)
+        if start == -1:
+            break
+        end = data.find(iend_magic, start)
+        if end == -1:
+            break
+        end += len(iend_magic)
+        png_bytes = data[start:end]
+        try:
+            img = Image.open(io.BytesIO(png_bytes))
+            img.load()
+            images.append((start, img))
+        except Exception:
+            pass
+        idx = end
+    return images
+
+
 # ====================================================================
 # Web Scanner Controller
 # ====================================================================
@@ -347,79 +407,93 @@ class WebModScanner:
                     _, ext = os.path.splitext(entry_name)
                     ext_lower = ext.lower()
 
-                    if ext_lower in IMAGE_EXTENSIONS:
+                    async def _evaluate_img(img: Image.Image, label: str):
+                        try:
+                            if img.width < 16 or img.height < 16:
+                                return
+                            extrema = img.convert("L").getextrema()
+                            if extrema[0] == extrema[1]:
+                                return
+                            norm = normalize_image_for_hashing(img)
+                            mod_hash = compute_dhash_pillow(norm, hash_size=self.image_rules.hash_size)
+
+                            if mod_hash.lower() not in self.whitelist:
+                                mod_int = int(mod_hash, 16)
+                                best_match = None
+                                best_dist = 999999
+                                best_ref_hash = None
+
+                                for ref_key, ref_int, ref_hex in self.ref_int_table:
+                                    dist = (mod_int ^ ref_int).bit_count()
+                                    if dist < best_dist:
+                                        best_dist = dist
+                                        best_match = ref_key
+                                        best_ref_hash = ref_hex
+                                        if dist == 0:
+                                            break
+
+                                total_bits = self.image_rules.hash_size ** 2
+                                sim_pct = max(0.0, (total_bits - best_dist) / total_bits * 100)
+
+                                if best_match and best_dist <= self.image_rules.threshold_auto_reject:
+                                    violations.append({
+                                        "file_path": label,
+                                        "rule_type": "DirectAssetRip",
+                                        "message": f"Asset matches canonical sprite '{best_match}' ({best_dist}/{total_bits} bits, {sim_pct:.1f}% similarity)"
+                                    })
+                                elif best_match and best_dist <= self.image_rules.threshold_flag_for_review:
+                                    preview_data_url = None
+                                    # Fetch canonical reference sprite for diff preview
+                                    if self.image_rules.generate_diff_preview and image_fetcher:
+                                        ref_url = self.get_canonical_image_url(best_match)
+                                        if ref_url:
+                                            try:
+                                                ref_bytes = await image_fetcher(ref_url)
+                                                if ref_bytes:
+                                                    ref_img = Image.open(io.BytesIO(ref_bytes))
+                                                    ref_img.load()
+                                                    diff_canvas = generate_diff_preview(
+                                                        mod_img=img,
+                                                        ref_img=ref_img,
+                                                        panel_size=self.image_rules.preview_panel_size,
+                                                    )
+                                                    buf = io.BytesIO()
+                                                    diff_canvas.save(buf, format="PNG")
+                                                    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                                                    preview_data_url = f"data:image/png;base64,{b64}"
+                                            except Exception as e:
+                                                logger.debug(f"Failed to fetch ref image for diff: {e}")
+
+                                    flags.append({
+                                        "file_path": label,
+                                        "matched_ref": best_match,
+                                        "hamming_distance": best_dist,
+                                        "similarity_pct": f"{sim_pct:.1f}%",
+                                        "mod_hash": mod_hash,
+                                        "ref_hash": best_ref_hash or "",
+                                        "preview_data_url": preview_data_url,
+                                    })
+                        except Exception as e:
+                            logger.debug(f"Could not parse image {label}: {e}")
+
+                    if ext_lower in IMAGE_EXTENSIONS or ext_lower in RAW_TEXTURE_EXTENSIONS:
                         try:
                             with zf.open(entry_name) as f:
-                                img_bytes = f.read()
-                            
-                            img = Image.open(io.BytesIO(img_bytes))
-                            img.load()
-
-                            # Ignore single-color masks or sub-16px helper tiles
-                            if img.width >= 16 and img.height >= 16:
-                                extrema = img.convert("L").getextrema()
-                                if extrema[0] != extrema[1]:
-                                    norm = normalize_image_for_hashing(img)
-                                    mod_hash = compute_dhash_pillow(norm, hash_size=self.image_rules.hash_size)
-
-                                    if mod_hash.lower() not in self.whitelist:
-                                        mod_int = int(mod_hash, 16)
-                                        best_match = None
-                                        best_dist = 999999
-                                        best_ref_hash = None
-
-                                        for ref_key, ref_int, ref_hex in self.ref_int_table:
-                                            dist = (mod_int ^ ref_int).bit_count()
-                                            if dist < best_dist:
-                                                best_dist = dist
-                                                best_match = ref_key
-                                                best_ref_hash = ref_hex
-                                                if dist == 0:
-                                                    break
-
-                                        total_bits = self.image_rules.hash_size ** 2
-                                        sim_pct = max(0.0, (total_bits - best_dist) / total_bits * 100)
-
-                                        if best_match and best_dist <= self.image_rules.threshold_auto_reject:
-                                            violations.append({
-                                                "file_path": entry_name,
-                                                "rule_type": "DirectAssetRip",
-                                                "message": f"Asset matches canonical sprite '{best_match}' ({best_dist}/{total_bits} bits, {sim_pct:.1f}% similarity)"
-                                            })
-                                        elif best_match and best_dist <= self.image_rules.threshold_flag_for_review:
-                                            preview_data_url = None
-                                            # Fetch canonical reference sprite for diff preview
-                                            if self.image_rules.generate_diff_preview and image_fetcher:
-                                                ref_url = self.get_canonical_image_url(best_match)
-                                                if ref_url:
-                                                    try:
-                                                        ref_bytes = await image_fetcher(ref_url)
-                                                        if ref_bytes:
-                                                            ref_img = Image.open(io.BytesIO(ref_bytes))
-                                                            ref_img.load()
-                                                            diff_canvas = generate_diff_preview(
-                                                                mod_img=img,
-                                                                ref_img=ref_img,
-                                                                panel_size=self.image_rules.preview_panel_size,
-                                                            )
-                                                            buf = io.BytesIO()
-                                                            diff_canvas.save(buf, format="PNG")
-                                                            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-                                                            preview_data_url = f"data:image/png;base64,{b64}"
-                                                    except Exception as e:
-                                                        logger.debug(f"Failed to fetch ref image for diff: {e}")
-
-                                            flags.append({
-                                                "file_path": entry_name,
-                                                "matched_ref": best_match,
-                                                "hamming_distance": best_dist,
-                                                "similarity_pct": f"{sim_pct:.1f}%",
-                                                "mod_hash": mod_hash,
-                                                "ref_hash": best_ref_hash or "",
-                                                "preview_data_url": preview_data_url,
-                                            })
+                                raw_bytes = f.read()
+                            parsed_img = _parse_image_from_bytes(raw_bytes, ext_lower)
+                            if parsed_img is not None:
+                                await _evaluate_img(parsed_img, entry_name)
                         except Exception as e:
                             logger.debug(f"Could not parse image {entry_name}: {e}")
+                    elif ext_lower in CONTAINER_PACKAGE_EXTENSIONS:
+                        try:
+                            with zf.open(entry_name) as f:
+                                raw_pkg_data = f.read()
+                            embedded = _extract_embedded_pngs(raw_pkg_data)
+                            for offset, emb_img in embedded:
+                                await _evaluate_img(emb_img, f"{entry_name} [embedded PNG @ 0x{offset:X}]")
+                        except Exception as e:
+                            logger.debug(f"Could not parse binary package {entry_name}: {e}")
 
         except Exception as e:
             violations.append({

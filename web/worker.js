@@ -61,10 +61,21 @@ async function initPyodideScanner() {
             message: "Fetching reference hashes and scan rules..."
         });
 
+        const baseUrl = self.location.href.substring(0, self.location.href.lastIndexOf("/") + 1);
+
         const [configRes, refRes, codeRes] = await Promise.all([
-            fetch("./config.yaml").then(r => r.text()),
-            fetch("./reference_hashes.json").then(r => r.text()),
-            fetch("./pyodide_scanner.py").then(r => r.text())
+            fetch(baseUrl + "config.yaml").then(r => {
+                if (!r.ok) throw new Error(`Failed to load config.yaml (HTTP ${r.status})`);
+                return r.text();
+            }),
+            fetch(baseUrl + "reference_hashes.json").then(r => {
+                if (!r.ok) throw new Error(`Failed to load reference_hashes.json (HTTP ${r.status})`);
+                return r.text();
+            }),
+            fetch(baseUrl + "pyodide_scanner.py").then(r => {
+                if (!r.ok) throw new Error(`Failed to load pyodide_scanner.py (HTTP ${r.status})`);
+                return r.text();
+            })
         ]);
 
         self.postMessage({
@@ -79,16 +90,18 @@ async function initPyodideScanner() {
         self.rawRefHashesJson = refRes;
 
         pyodide.runPython(codeRes);
-        pyodide.runPython(`
+        const hashCount = pyodide.runPython(`
 import js
 scanner = WebModScanner(
     config_yaml_str=js.rawConfigYaml,
     reference_hashes_json_str=js.rawRefHashesJson
 )
+len(scanner.ref_int_table)
 `);
 
+        console.log(`[mod-scanner] Pyodide WebAssembly engine ready with ${hashCount} reference hashes.`);
         isReady = true;
-        self.postMessage({ type: "READY" });
+        self.postMessage({ type: "READY", hashCount: Number(hashCount) });
 
     } catch (err) {
         self.postMessage({
