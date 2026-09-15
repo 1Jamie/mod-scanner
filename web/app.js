@@ -298,7 +298,6 @@
 
         const ghInfo = parseGitHubUrl(url);
         startScanUI(url);
-        scanStatusFile.textContent = "Fetching archive stream from GitHub...";
 
         const token = inputGhToken.value.trim();
         const headers = {};
@@ -307,38 +306,87 @@
         }
 
         try {
-            let downloadUrl = url;
-            let archiveName = "remote_mod.zip";
-
             if (ghInfo) {
-                // Use GitHub API to download zipball (CORS-enabled)
-                downloadUrl = `https://api.github.com/repos/${ghInfo.owner}/${ghInfo.repo}/zipball/${ghInfo.ref}`;
-                archiveName = `${ghInfo.owner}_${ghInfo.repo}.zip`;
-            }
+                scanStatusFile.textContent = "Querying repository file tree from GitHub API...";
 
-            const response = await fetch(downloadUrl, { headers });
+                // 1. Fetch Git Trees via GitHub REST API (CORS-enabled: *)
+                let treeUrl = `https://api.github.com/repos/${ghInfo.owner}/${ghInfo.repo}/git/trees/${ghInfo.ref}?recursive=1`;
+                let treeResp = await fetch(treeUrl, { headers });
 
-            if (response.status === 403) {
-                throw new Error("GitHub API rate limit exceeded (60 requests/hr). Please add a Personal Access Token in Settings or drag-and-drop the downloaded .zip directly.");
-            }
-            if (response.status === 404 && ghInfo && ghInfo.ref === "main") {
-                // Retry with 'master' branch fallback
-                const altUrl = `https://api.github.com/repos/${ghInfo.owner}/${ghInfo.repo}/zipball/master`;
-                const altResp = await fetch(altUrl, { headers });
-                if (!altResp.ok) throw new Error(`Failed to fetch repo: ${altResp.statusText}`);
-                const buffer = await altResp.arrayBuffer();
-                scanArrayBuffer(buffer, archiveName);
+                if (treeResp.status === 404 && ghInfo.ref === "main") {
+                    // Try master fallback
+                    ghInfo.ref = "master";
+                    treeUrl = `https://api.github.com/repos/${ghInfo.owner}/${ghInfo.repo}/git/trees/master?recursive=1`;
+                    treeResp = await fetch(treeUrl, { headers });
+                }
+
+                if (treeResp.status === 403) {
+                    throw new Error("GitHub API rate limit reached. Please supply a Personal Access Token in Settings or drag-and-drop the downloaded .zip directly.");
+                }
+                if (!treeResp.ok) {
+                    throw new Error(`Failed to query repository (HTTP ${treeResp.status}: ${treeResp.statusText}).`);
+                }
+
+                const treeData = await treeResp.json();
+                const blobs = (treeData.tree || []).filter(item => item.type === "blob");
+
+                if (blobs.length === 0) {
+                    throw new Error("No files found in the specified repository branch.");
+                }
+
+                scanStatusFile.textContent = `Downloading ${blobs.length} repository files...`;
+
+                // 2. Fetch files via raw.githubusercontent.com in parallel batches (CORS-enabled: *)
+                const zipObj = {};
+                const concurrency = 8;
+                let completed = 0;
+
+                for (let i = 0; i < blobs.length; i += concurrency) {
+                    const batch = blobs.slice(i, i + concurrency);
+                    await Promise.all(batch.map(async (blob) => {
+                        const fileRawUrl = `https://raw.githubusercontent.com/${ghInfo.owner}/${ghInfo.repo}/${ghInfo.ref}/${blob.path}`;
+                        try {
+                            const res = await fetch(fileRawUrl);
+                            if (res.ok) {
+                                const arr = new Uint8Array(await res.arrayBuffer());
+                                zipObj[blob.path] = arr;
+                            }
+                        } catch (err) {
+                            console.warn(`Could not fetch ${blob.path}:`, err);
+                        }
+                        completed++;
+                        scanPercentBadge.textContent = `${Math.round((completed / blobs.length) * 100)}%`;
+                        scanStatusFile.textContent = `Downloaded ${completed}/${blobs.length} files...`;
+                    }));
+                }
+
+                // 3. Compress downloaded files into in-memory zip
+                scanStatusFile.textContent = "Packaging archive for scanner engine...";
+                const zippedData = fflate.zipSync(zipObj);
+                scanArrayBuffer(zippedData.buffer, `${ghInfo.owner}_${ghInfo.repo}.zip`);
                 return;
             }
+
+            // Direct URL (non-repo URL)
+            scanStatusFile.textContent = "Fetching release archive...";
+            let response;
+            try {
+                response = await fetch(url, { headers });
+            } catch (corsErr) {
+                // Try via CORS proxy fallback
+                const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
+                response = await fetch(proxyUrl);
+            }
+
             if (!response.ok) {
-                throw new Error(`Failed to download URL (HTTP ${response.status}: ${response.statusText}). If CORS is blocked, please download the file and drag-and-drop it.`);
+                throw new Error(`Failed to download URL (HTTP ${response.status}). Browser security (CORS) may have blocked access. Please download the .zip and drag-and-drop it.`);
             }
 
             const buffer = await response.arrayBuffer();
-            scanArrayBuffer(buffer, archiveName);
+            scanArrayBuffer(buffer, "remote_release.zip");
 
         } catch (err) {
-            alert(`Download Error: ${err.message}`);
+            alert(`Scan Error: ${err.message}`);
             resetScanState();
         }
     }
