@@ -49,6 +49,7 @@ runs:
       with:
         python-version: '3.11'
         cache: 'pip'
+        cache-dependency-path: ${{ github.action_path }}/requirements.txt
 
     - name: Cache Reference Hash Database
       uses: actions/cache@v4
@@ -56,7 +57,7 @@ runs:
         path: |
           .cache/reference_hashes.json
           ~/.cache/mod-scanner/
-        key: mod-scanner-ref-db-${{ runner.os }}-${{ hashFiles('**/config.yaml') }}
+        key: mod-scanner-ref-db-${{ runner.os }}-${{ hashFiles(format('{0}/config.yaml', github.action_path)) }}
         restore-keys: |
           mod-scanner-ref-db-${{ runner.os }}-
 
