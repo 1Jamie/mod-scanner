@@ -18,11 +18,11 @@ Mod authors should verify their mod files before uploading to release channels t
 
 ---
 
-## 3 Ways to Check Your Mod
+## How to Check Your Mod
 
 ### Method 1: Local Scan (Working Directory or Zip)
 
-You can scan your local working tree or a packed `.zip` archive using the Python CLI without needing an active bot.
+You can scan your local working tree or a packed `.zip` archive using the Python CLI.
 
 #### Quick Setup:
 ```bash
@@ -94,17 +94,6 @@ jobs:
 
 ---
 
-### Method 3: Discord Self-Service Pre-Check
-
-In Discord servers running the mod-scanner bot, you can test your mod privately before publishing to forum release channels:
-
-- **/check-mod [file] [url]**: Runs a private ephemeral scan visible only to you.
-  - If rejected, lists the exact filenames and ROM headers detected.
-  - If flagged, displays percentage similarity scores, attaches the top preview image, and provides a downloadable `.zip` of all 3-panel diff comparisons.
-- **!check [url]**: Text command fallback.
-
----
-
 ## Understanding 3-Panel Diff Previews
 
 When an asset has a close silhouette or palette similarity to an official sprite, `mod-scanner` generates a 3-panel visual diff:
@@ -122,8 +111,8 @@ When an asset has a close silhouette or palette similarity to an official sprite
 
 ---
 
-## Server Administration & Self-Hosting
+## Advanced Configuration & Administration
 
-Looking to host the Discord bot, configure server monitoring, or customize detection rules?
+Looking to configure custom detection rules, update reference databases, or manage whitelists?
 
-See the [Hosting & Server Administration Guide (HOSTING.md)](HOSTING.md).
+See the [Administration Guide (HOSTING.md)](HOSTING.md).
