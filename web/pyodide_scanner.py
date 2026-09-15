@@ -238,9 +238,15 @@ class WebModScanner:
             preview_panel_size=i_cfg.get("preview_panel_size", 64),
         )
 
-        # Parse reference hashes
+        # Parse reference hashes and pre-compile integer lookup table for high-speed bit_count
         ref_data = json.loads(reference_hashes_json_str) if isinstance(reference_hashes_json_str, str) else reference_hashes_json_str
         self.ref_hashes: Dict[str, str] = ref_data.get("hashes", {}) if isinstance(ref_data, dict) else {}
+        self.ref_int_table: List[Tuple[str, int, str]] = []
+        for k, h in self.ref_hashes.items():
+            try:
+                self.ref_int_table.append((k, int(h, 16), h))
+            except Exception:
+                pass
         self.whitelist: set[str] = set()
 
     def add_whitelist_hashes(self, hashes: list[str]):
@@ -357,16 +363,17 @@ class WebModScanner:
                                     mod_hash = compute_dhash_pillow(norm, hash_size=self.image_rules.hash_size)
 
                                     if mod_hash.lower() not in self.whitelist:
+                                        mod_int = int(mod_hash, 16)
                                         best_match = None
                                         best_dist = 999999
                                         best_ref_hash = None
 
-                                        for ref_key, ref_hash in self.ref_hashes.items():
-                                            dist = calculate_hamming_distance(mod_hash, ref_hash)
+                                        for ref_key, ref_int, ref_hex in self.ref_int_table:
+                                            dist = (mod_int ^ ref_int).bit_count()
                                             if dist < best_dist:
                                                 best_dist = dist
                                                 best_match = ref_key
-                                                best_ref_hash = ref_hash
+                                                best_ref_hash = ref_hex
                                                 if dist == 0:
                                                     break
 

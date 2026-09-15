@@ -30,6 +30,12 @@ class ReferenceDatabase:
     def __init__(self, hashes: Dict[str, str], image_dir: Path):
         self.hashes: Dict[str, str] = hashes  # { "pokered/gfx/pokemon/front/bulbasaur.png": "hex_hash" }
         self.image_dir: Path = image_dir
+        self.int_table: list[tuple[str, int, str]] = []
+        for k, h in self.hashes.items():
+            try:
+                self.int_table.append((k, int(h, 16), h))
+            except Exception:
+                pass
 
     def get_reference_image(self, ref_key: str) -> Optional[Image.Image]:
         """Loads a cached reference image from the local filesystem."""

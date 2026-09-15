@@ -191,16 +191,17 @@ def _evaluate_image_against_reference_db(
         if scanner.whitelist.is_approved(mod_hash):
             return
 
+        mod_int = int(mod_hash, 16)
         best_match_key = None
         best_distance = 999999
         best_ref_hash = None
 
-        for ref_key, ref_hash in scanner.ref_db.hashes.items():
-            dist = calculate_hamming_distance(mod_hash, ref_hash)
+        for ref_key, ref_int, ref_hex in scanner.ref_db.int_table:
+            dist = (mod_int ^ ref_int).bit_count()
             if dist < best_distance:
                 best_distance = dist
                 best_match_key = ref_key
-                best_ref_hash = ref_hash
+                best_ref_hash = ref_hex
                 if dist == 0:
                     break
 

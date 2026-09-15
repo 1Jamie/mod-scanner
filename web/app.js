@@ -328,21 +328,37 @@
                 }
 
                 const treeData = await treeResp.json();
-                const blobs = (treeData.tree || []).filter(item => item.type === "blob");
+                const allBlobs = (treeData.tree || []).filter(item => item.type === "blob");
 
-                if (blobs.length === 0) {
+                if (allBlobs.length === 0) {
                     throw new Error("No files found in the specified repository branch.");
                 }
 
-                scanStatusFile.textContent = `Downloading ${blobs.length} repository files...`;
+                // Pre-filter candidate files to skip irrelevant files (docs, C source, gitignores, etc.)
+                const RELEVANT_EXTENSIONS = new Set([
+                    ".png", ".bmp", ".jpg", ".jpeg", ".webp", ".tga", ".rgba", ".rgb", ".bgra", ".raw",
+                    ".gb", ".gbc", ".gba", ".nds", ".3ds", ".cia", ".cxi", ".z64", ".n64", ".v64",
+                    ".iso", ".wbfs", ".wad", ".nsp", ".xci",
+                    ".pack", ".dat", ".pak", ".bundle", ".bin", ".arc", ".res", ".fsys", ".rarc",
+                    ".lua", ".yaml", ".yml", ".json", ".toml"
+                ]);
 
-                // 2. Fetch files via raw.githubusercontent.com in parallel batches (CORS-enabled: *)
+                const blobs = allBlobs.filter(b => {
+                    const dotIdx = b.path.lastIndexOf(".");
+                    const ext = dotIdx !== -1 ? b.path.slice(dotIdx).toLowerCase() : "";
+                    return RELEVANT_EXTENSIONS.has(ext);
+                });
+
+                const targetBlobs = blobs.length > 0 ? blobs : allBlobs;
+                scanStatusFile.textContent = `Downloading ${targetBlobs.length} relevant assets (skipped ${allBlobs.length - targetBlobs.length} non-asset files)...`;
+
+                // 2. Fetch files via raw.githubusercontent.com in parallel batches (concurrency: 16)
                 const zipObj = {};
-                const concurrency = 8;
+                const concurrency = 16;
                 let completed = 0;
 
-                for (let i = 0; i < blobs.length; i += concurrency) {
-                    const batch = blobs.slice(i, i + concurrency);
+                for (let i = 0; i < targetBlobs.length; i += concurrency) {
+                    const batch = targetBlobs.slice(i, i + concurrency);
                     await Promise.all(batch.map(async (blob) => {
                         const fileRawUrl = `https://raw.githubusercontent.com/${ghInfo.owner}/${ghInfo.repo}/${ghInfo.ref}/${blob.path}`;
                         try {
@@ -355,8 +371,8 @@
                             console.warn(`Could not fetch ${blob.path}:`, err);
                         }
                         completed++;
-                        scanPercentBadge.textContent = `${Math.round((completed / blobs.length) * 100)}%`;
-                        scanStatusFile.textContent = `Downloaded ${completed}/${blobs.length} files...`;
+                        scanPercentBadge.textContent = `${Math.round((completed / targetBlobs.length) * 100)}%`;
+                        scanStatusFile.textContent = `Downloaded ${completed}/${targetBlobs.length} files...`;
                     }));
                 }
 
