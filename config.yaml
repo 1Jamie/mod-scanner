@@ -26,10 +26,18 @@ pret_sources:
       - "gfx/sprites/**/*.png"
       - "gfx/pokemon/**/*.png"
       - "gfx/trainers/**/*.png"
+  - name: "pokegold"
+    repo: "pret/pokegold"
+    branch: "master"
+    image_patterns:
+      - "gfx/sprites/**/*.png"
+      - "gfx/pokemon/**/*.png"
+      - "gfx/trainers/**/*.png"
   - name: "pokecrystal"
     repo: "pret/pokecrystal"
     branch: "master"
     image_patterns:
+      - "gfx/sprites/**/*.png"
       - "gfx/pokemon/**/front.png"
       - "gfx/pokemon/**/back.png"
       - "gfx/trainers/**/*.png"

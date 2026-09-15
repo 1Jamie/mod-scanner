@@ -76,6 +76,21 @@ pret_sources:
       - "gfx/sprites/**/*.png"
       - "gfx/pokemon/**/*.png"
       - "gfx/trainers/**/*.png"
+  - name: "pokegold"
+    repo: "pret/pokegold"
+    branch: "master"
+    image_patterns:
+      - "gfx/sprites/**/*.png"
+      - "gfx/pokemon/**/*.png"
+      - "gfx/trainers/**/*.png"
+  - name: "pokecrystal"
+    repo: "pret/pokecrystal"
+    branch: "master"
+    image_patterns:
+      - "gfx/sprites/**/*.png"
+      - "gfx/pokemon/**/front.png"
+      - "gfx/pokemon/**/back.png"
+      - "gfx/trainers/**/*.png"
   - name: "pokefirered"
     repo: "pret/pokefirered"
     branch: "master"
@@ -83,12 +98,14 @@ pret_sources:
       - "graphics/pokemon/**/front.png"
       - "graphics/pokemon/**/back.png"
       - "graphics/trainers/**/*.png"
-  - name: "pokeheartgold"
-    repo: "pret/pokeheartgold"
+  - name: "pokeemerald"
+    repo: "pret/pokeemerald"
     branch: "master"
     image_patterns:
-      - "files/graphic/**/*.png"
-      - "src/data/graphics/**/*.png"
+      - "graphics/pokemon/**/front.png"
+      - "graphics/pokemon/**/back.png"
+      - "graphics/pokemon/**/icon.png"
+      - "graphics/trainers/**/*.png"
 
 # Archive safety limits
 archive:

@@ -116,9 +116,17 @@ def index_pret_archive(
                 continue
             relative_path = str(Path(*parts[1:]))
 
-            # Match against configured patterns
+            # Match against configured patterns (support ** matching zero subdirectories)
             matches_pattern = any(
-                fnmatch.fnmatch(relative_path, pat) or fnmatch.fnmatch(member.name, pat)
+                fnmatch.fnmatch(relative_path, pat)
+                or fnmatch.fnmatch(member.name, pat)
+                or (
+                    "**/" in pat
+                    and (
+                        fnmatch.fnmatch(relative_path, pat.replace("**/", ""))
+                        or fnmatch.fnmatch(member.name, pat.replace("**/", ""))
+                    )
+                )
                 for pat in source.image_patterns
             )
             if not matches_pattern:
