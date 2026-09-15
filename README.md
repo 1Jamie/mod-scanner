@@ -20,7 +20,20 @@ Mod authors should verify their mod files before uploading to release channels t
 
 ## How to Check Your Mod
 
-### Method 1: Local Scan (Working Directory or Zip)
+### Method 1: Online Web Scanner (Zero Installation)
+
+You can scan mod files directly in your web browser with 100% bit-for-bit parity to the Python CLI:
+
+👉 **[Launch mod-scanner Web App](https://1jamie.github.io/mod-scanner/)**
+
+- **Drag & Drop**: Drop your mod `.zip` archive or select a local working folder.
+- **GitHub URL**: Enter a public repository or release URL to scan automatically.
+- **Client-Side Wasm**: Powered by Pyodide (WebAssembly). Runs completely in your browser with zero server uploads or backend storage.
+- **Interactive Reports**: Inspect side-by-side 3-panel diff comparisons and export Markdown / JSON summary reports.
+
+---
+
+### Method 2: Local Python CLI (Working Directory or Zip)
 
 You can scan your local working tree or a packed `.zip` archive using the Python CLI.
 
@@ -55,7 +68,7 @@ Use `--no-fail-on-flagged` to return exit code `0` for flagged similarity warnin
 
 ---
 
-### Method 2: GitHub Actions CI/CD Integration
+### Method 3: GitHub Actions CI/CD Integration
 
 Add `mod-scanner` directly into your repository workflow to automatically scan pull requests and tag releases. The action caches reference databases, posts a Markdown report to GitHub Step Summary, and attaches generated diff PNGs as workflow artifacts.
 
