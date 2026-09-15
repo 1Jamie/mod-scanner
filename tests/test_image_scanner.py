@@ -68,3 +68,22 @@ def test_diff_preview_generation():
     assert canvas.mode == "RGB"
     assert canvas.width > 64 * 3
     assert canvas.height > 64
+
+
+def test_pure_pillow_dhash_exact_parity():
+    import imagehash
+    from mod_scanner.core.image_scanner import compute_image_hash
+
+    for i in range(10):
+        img = Image.new("RGBA", (64, 64), (i * 20, 100, 200 - i * 15, 255))
+        d = ImageDraw.Draw(img)
+        d.rectangle((10 + i * 2, 10, 50, 50), fill=(20 + i * 10, 30, 40, 255))
+        d.ellipse((15, 15, 35, 35), fill=(200, 10 + i * 10, 10, 255))
+
+        normalized = normalize_image_for_hashing(img)
+        # Expected from imagehash
+        ih_hash = str(imagehash.dhash(normalized, hash_size=16))
+        # From scanner
+        scanner_hash = compute_image_hash(img, hash_size=16, hash_type="dhash")
+
+        assert scanner_hash == ih_hash, f"Mismatch at iter {i}: {scanner_hash} vs {ih_hash}"
